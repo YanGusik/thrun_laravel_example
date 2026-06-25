@@ -1,0 +1,128 @@
+<?php
+
+declare(strict_types=1);
+
+use Thrun\Transport\Strategy\PriorityStrategy;
+use Thrun\Transport\Strategy\RoundRobinStrategy;
+use Thrun\Transport\Policy\MaxConcurrencyPolicy;
+
+return [
+    'redis'       => [
+        'host'    => env('THRUN_REDIS_HOST', '127.0.0.1'),
+        'port'    => (int) env('THRUN_REDIS_PORT', 6379),
+        'prefix'  => env('THRUN_REDIS_PREFIX', 'thrun:queue'),
+        'timeout' => 1.0,
+    ],
+
+    'queues'      => [
+        'emails'           => [
+            'transport' => 'redis',
+        ],
+        'notifications'    => [
+            'transport' => 'memory',
+        ],
+        'video_processing' => [
+            'transport' => 'redis',
+        ],
+    ],
+
+    'supervisors' => [
+        'default' => [
+            'queues' => ['emails', 'notifications'],
+
+            'worker' => [
+                'threads'     => (int) env('THRUN_WORKER_THREADS', 2),
+                'concurrency' => (int) env('THRUN_WORKER_CONCURRENCY', 100),
+                'queue_size'  => (int) env('THRUN_WORKER_QUEUE_SIZE', 1000),
+            ],
+
+            'supervisor' => [
+                'max_crashes'     => (int) env('THRUN_SUPERVISOR_MAX_CRASHES', 3),
+                'restart_window'  => (int) env('THRUN_SUPERVISOR_RESTART_WINDOW', 300),
+                'restart_backoff' => (float) env('THRUN_SUPERVISOR_RESTART_BACKOFF', 1.0),
+            ],
+
+            'strategy' => [
+                'class'      => PriorityStrategy::class,
+                'priorities' => ['emails' => 3, 'notifications' => 1],
+            ],
+
+            'policy' => [
+                'enabled' => false,
+                'class'   => MaxConcurrencyPolicy::class,
+                'options' => ['max_per_partition' => 5],
+            ],
+
+            'handlers' => [
+                // Key = routeKey (string). Can be PHP class name or any string (e.g. for Go interop).
+                // Value = class-string or static Closure.
+                //
+                // App\Messages\SendEmailMessage::class => App\Handlers\SendEmailHandler::class,
+                // 'python_key' => App\Handlers\SendEmailHandler::class,
+                // 'go_key' => static function ($message, $ack) { ... },
+            ],
+
+            'middleware' => [
+                // List of middleware class names implementing WorkerMiddlewareInterface.
+                // Resolved via Laravel container (constructor injection supported).
+                //
+                // \App\Middleware\LogMiddleware::class,
+                // \App\Middleware\MetricsMiddleware::class,
+                \Thrun\Middleware\CatchMessageMiddleware::class,
+            ],
+        ],
+
+        'heavy_cpu' => [
+            'queues' => ['video_processing'],
+
+            'worker' => [
+                'threads'     => 3,
+                'concurrency' => 0,
+            ],
+
+            'supervisor' => [
+                'max_crashes'     => 5,
+                'restart_window'  => 600,
+                'restart_backoff' => 2.0,
+            ],
+
+            'strategy' => [
+                'class'      => RoundRobinStrategy::class,
+                'priorities' => ['video_processing' => 1],
+            ],
+
+            'policy' => [
+                'enabled' => false,
+                'class'   => MaxConcurrencyPolicy::class,
+                'options' => ['max_per_partition' => 2],
+            ],
+
+            'handlers' => [
+                // App\Messages\ProcessVideoMessage::class => App\Handlers\ProcessVideoHandler::class,
+            ],
+
+            'middleware' => [],
+        ],
+    ],
+
+    'rpc' => [
+        'enabled'     => env('THRUN_RPC_ENABLED', true),
+        'transport'   => env('THRUN_RPC_TRANSPORT', 'unix'), // unix|tcp
+        'socket_path' => env('THRUN_RPC_SOCKET', sys_get_temp_dir().'/thrun_rpc.sock'),
+        'host'        => env('THRUN_RPC_HOST', '127.0.0.1'),
+        'port'        => (int) env('THRUN_RPC_PORT', 9000),
+    ],
+
+    'failed' => [
+        'driver' => env('THRUN_FAILED_DRIVER', 'redis'),
+        'redis'  => [
+            'prefix' => env('THRUN_FAILED_PREFIX', 'thrun:failed'),
+        ],
+    ],
+
+    'auto_discover' => [
+        'App\\Handlers',
+        'App\\Jobs',
+        'App\\Events',
+    ],
+];

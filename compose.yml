@@ -1,0 +1,40 @@
+services:
+    app:
+        build: .
+        volumes:
+#            - .:/app if local have vendor
+            - rpc_socket:/tmp
+        depends_on:
+            redis:
+                condition: service_healthy
+        entrypoint: >
+            sh -c "
+                cp .env.example .env &&
+                php artisan key:generate &&
+                php artisan thrun:work
+            "
+    event:
+        build: .
+        volumes:
+#            - .:/app
+            - rpc_socket:/tmp
+        depends_on:
+            - app
+        entrypoint: >
+            sh -c "
+                sleep 1 &&
+                php artisan thrun:event
+            "
+
+    redis:
+        image: redis:alpine
+        ports:
+            - "6379:6379"
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 2s
+            timeout: 3s
+            retries: 5
+
+volumes:
+    rpc_socket:
